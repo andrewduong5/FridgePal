@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160">
+  <!-- Crisp Pure White Square Background -->
+  <rect width="100%" height="100%" fill="#ffffff" rx="28" />
+
+  <g transform="translate(18, 14)">
+    <!-- Main Refrigerator Body -->
+    <rect x="10" y="16" width="70" height="114" rx="9" fill="none" stroke="#006be5" stroke-width="8" stroke-linejoin="round"/>
+
+    <!-- Open Refrigerator Door -->
+    <path d="M80 22 L102 34 L102 112 L80 124 Z" fill="#006be5" stroke="#006be5" stroke-width="2" stroke-linejoin="round"/>
+    <!-- Door Handle -->
+    <rect x="90" y="62" width="4.5" height="20" rx="2" fill="#ffffff"/>
+
+    <!-- Interior Shelves -->
+    <line x1="14" y1="58" x2="77" y2="58" stroke="#006be5" stroke-width="6.5" stroke-linecap="round"/>
+    <line x1="14" y1="88" x2="77" y2="88" stroke="#006be5" stroke-width="6.5" stroke-linecap="round"/>
+
+    <!-- Top Shelf Bottle & Bowl -->
+    <path d="M25 36 L31 36 L31 54 L25 54 Z" fill="none" stroke="#006be5" stroke-width="4" stroke-linejoin="round"/>
+    <line x1="28" y1="31" x2="28" y2="36" stroke="#006be5" stroke-width="4" stroke-linecap="round"/>
+    <path d="M43 40 L63 40 C63 51 43 51 43 40 Z" fill="none" stroke="#006be5" stroke-width="4" stroke-linejoin="round"/>
+
+    <!-- Middle Shelf Items -->
+    <rect x="25" y="70" width="10" height="17" rx="1.5" fill="none" stroke="#006be5" stroke-width="4"/>
+    <line x1="41" y1="73" x2="62" y2="73" stroke="#006be5" stroke-width="4.5" stroke-linecap="round"/>
+    <line x1="41" y1="81" x2="57" y2="81" stroke="#006be5" stroke-width="4.5" stroke-linecap="round"/>
+
+    <!-- Bottom Crisper Drawer -->
+    <rect x="18" y="96" width="54" height="26" rx="4" fill="none" stroke="#006be5" stroke-width="4.5"/>
+    <line x1="36" y1="106" x2="54" y2="106" stroke="#006be5" stroke-width="4.5" stroke-linecap="round"/>
+
+    <!-- Tilted Green Leaf Accent on Top Right -->
+    <g transform="translate(86, 0)">
+      <path d="M34 2 C16 6 3 20 0 38 C12 38 27 33 36 21 C41 13 40 5 34 2 Z" fill="#64bf7d"/>
+      <path d="M5 34 C16 25 26 16 32 6" stroke="#ffffff" stroke-width="2" stroke-linecap="round" fill="none"/>
+    </g>
+  </g>
+</svg>
