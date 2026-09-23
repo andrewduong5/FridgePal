@@ -145,7 +145,7 @@ export const fridgePalClient = {
             }
 
             const response = await fetch(
-              `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+              `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${apiKey}`,
               {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -166,14 +166,15 @@ export const fridgePalClient = {
             let rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
             if (rawText) {
-              rawText = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
+              // Strip Markdown code fencing if present
+              rawText = rawText.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
               return JSON.parse(rawText);
             }
           } catch (e) {
             console.error("Gemini API call failed, falling back to local simulation:", e);
           }
         } else {
-          console.warn("No VITE_GEMINI_API_KEY detected in .env. Using demo simulation data.");
+          console.warn("No VITE_GEMINI_API_KEY detected in environment. Using demo simulation data.");
         }
 
         // --- Demo Fallback ---
