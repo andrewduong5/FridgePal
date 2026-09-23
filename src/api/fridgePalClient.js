@@ -110,71 +110,68 @@ export const fridgePalClient = {
   integrations: {
     Core: {
       async UploadPublicFile({ file }) {
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
           const reader = new FileReader();
-          reader.onloadend = () => resolve({ file_url: reader.result });
+          reader.onerror = reject;
+          reader.onload = (event) => {
+            const img = new Image();
+            img.onerror = reject;
+            img.onload = () => {
+              const MAX_WIDTH = 1200;
+              const MAX_HEIGHT = 1200;
+              let width = img.width;
+              let height = img.height;
+
+              if (width > height) {
+                if (width > MAX_WIDTH) {
+                  height = Math.round((height * MAX_WIDTH) / width);
+                  width = MAX_WIDTH;
+                }
+              } else {
+                if (height > MAX_HEIGHT) {
+                  width = Math.round((width * MAX_HEIGHT) / height);
+                  height = MAX_HEIGHT;
+                }
+              }
+
+              const canvas = document.createElement("canvas");
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext("2d");
+              ctx.drawImage(img, 0, 0, width, height);
+
+              const compressedBase64 = canvas.toDataURL("image/jpeg", 0.8);
+              resolve({ file_url: compressedBase64 });
+            };
+            img.src = event.target.result;
+          };
           reader.readAsDataURL(file);
         });
       },
 
       async InvokeLLM({ prompt, file_urls = [], response_json_schema }) {
-        const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+        try {
+          const response = await fetch("/api/gemini", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              prompt,
+              file_urls,
+              response_json_schema,
+            }),
+          });
 
-        if (apiKey) {
-          try {
-            const parts = [{ text: prompt }];
-
-            if (file_urls.length > 0 && file_urls[0]?.includes("base64,")) {
-              const [header, base64Data] = file_urls[0].split("base64,");
-              const mimeType = header.replace("data:", "").replace(";", "").trim() || "image/jpeg";
-
-              parts.push({
-                inlineData: {
-                  mimeType: mimeType,
-                  data: base64Data,
-                },
-              });
-            }
-
-            const generationConfig = {
-              responseMimeType: "application/json",
-            };
-
-            if (response_json_schema) {
-              generationConfig.responseSchema = response_json_schema;
-            }
-
-            const response = await fetch(
-              `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${apiKey}`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  contents: [{ parts }],
-                  generationConfig,
-                }),
-              }
-            );
-
-            if (!response.ok) {
-              const errBody = await response.text();
-              console.error("Gemini API Error Response:", errBody);
-              throw new Error(`Gemini HTTP ${response.status}: ${errBody}`);
-            }
-
-            const data = await response.json();
-            let rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-            if (rawText) {
-              // Strip Markdown code fencing if present
-              rawText = rawText.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
-              return JSON.parse(rawText);
-            }
-          } catch (e) {
-            console.error("Gemini API call failed, falling back to local simulation:", e);
+          if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Serverless endpoint error (${response.status}): ${errText}`);
           }
-        } else {
-          console.warn("No VITE_GEMINI_API_KEY detected in environment. Using demo simulation data.");
+
+          const data = await response.json();
+          return data;
+        } catch (e) {
+          console.error("Gemini serverless call failed, falling back to local simulation:", e);
         }
 
         // --- Demo Fallback ---
