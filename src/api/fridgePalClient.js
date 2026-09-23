@@ -118,62 +118,54 @@ export const fridgePalClient = {
       },
 
       async InvokeLLM({ prompt, file_urls = [], response_json_schema }) {
-        const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+        try {
+          const parts = [{ text: prompt }];
 
-        if (apiKey) {
-          try {
-            const parts = [{ text: prompt }];
+          if (file_urls.length > 0 && file_urls[0]?.includes("base64,")) {
+            const [header, base64Data] = file_urls[0].split("base64,");
+            const mimeType = header.replace("data:", "").replace(";", "").trim() || "image/jpeg";
 
-            if (file_urls.length > 0 && file_urls[0]?.includes("base64,")) {
-              const [header, base64Data] = file_urls[0].split("base64,");
-              const mimeType = header.replace("data:", "").replace(";", "").trim() || "image/jpeg";
-
-              parts.push({
-                inlineData: {
-                  mimeType: mimeType,
-                  data: base64Data,
-                },
-              });
-            }
-
-            const generationConfig = {
-              responseMimeType: "application/json",
-            };
-
-            if (response_json_schema) {
-              generationConfig.responseSchema = response_json_schema;
-            }
-
-            const response = await fetch(
-              `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${apiKey}`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  contents: [{ parts }],
-                  generationConfig,
-                }),
-              }
-            );
-
-            if (!response.ok) {
-              const errBody = await response.text();
-              console.error("Gemini API Error Response:", errBody);
-              throw new Error(`Gemini HTTP ${response.status}: ${errBody}`);
-            }
-
-            const data = await response.json();
-            let rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-            if (rawText) {
-              rawText = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
-              return JSON.parse(rawText);
-            }
-          } catch (e) {
-            console.error("Gemini API call failed, falling back to local simulation:", e);
+            parts.push({
+              inlineData: {
+                mimeType: mimeType,
+                data: base64Data,
+              },
+            });
           }
-        } else {
-          console.warn("No VITE_GEMINI_API_KEY detected in .env. Using demo simulation data.");
+
+          const generationConfig = {
+            responseMimeType: "application/json",
+          };
+
+          if (response_json_schema) {
+            generationConfig.responseSchema = response_json_schema;
+          }
+
+          // Calls your secure Vercel serverless function proxy
+          const response = await fetch("/api/gemini", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ parts }],
+              generationConfig,
+            }),
+          });
+
+          if (!response.ok) {
+            const errBody = await response.text();
+            console.error("Proxy API Error Response:", errBody);
+            throw new Error(`API HTTP ${response.status}: ${errBody}`);
+          }
+
+          const data = await response.json();
+          let rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+          if (rawText) {
+            rawText = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
+            return JSON.parse(rawText);
+          }
+        } catch (e) {
+          console.error("API call failed, falling back to local simulation:", e);
         }
 
         // --- Demo Fallback ---
