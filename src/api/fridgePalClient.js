@@ -40,6 +40,46 @@ const DEFAULT_ITEMS = [
     status: "active",
     category: "Dairy/Alts",
     updated_date: new Date().toISOString()
+  },
+  {
+    id: "item-5",
+    name: "Sliced Bread",
+    quantity: 16,
+    unit: "slices",
+    expiration_date: new Date(Date.now() + 6 * 86400000).toISOString().split("T")[0],
+    status: "active",
+    category: "Bakery",
+    updated_date: new Date().toISOString()
+  },
+  {
+    id: "item-6",
+    name: "Flour Tortillas",
+    quantity: 10,
+    unit: "tortillas",
+    expiration_date: new Date(Date.now() + 12 * 86400000).toISOString().split("T")[0],
+    status: "active",
+    category: "Bakery",
+    updated_date: new Date().toISOString()
+  },
+  {
+    id: "item-7",
+    name: "Black Beans",
+    quantity: 2,
+    unit: "cans",
+    expiration_date: new Date(Date.now() + 60 * 86400000).toISOString().split("T")[0],
+    status: "active",
+    category: "Pantry",
+    updated_date: new Date().toISOString()
+  },
+  {
+    id: "item-8",
+    name: "Dark Chocolate",
+    quantity: 1,
+    unit: "bar",
+    expiration_date: new Date(Date.now() + 45 * 86400000).toISOString().split("T")[0],
+    status: "active",
+    category: "Snacks",
+    updated_date: new Date().toISOString()
   }
 ];
 
@@ -65,10 +105,11 @@ export const RECIPE_SCHEMA = {
     nutrition: {
       type: "object",
       properties: {
-        protein: { type: "string", description: "e.g. 24g" },
-        carbs: { type: "string", description: "e.g. 35g" },
-        fat: { type: "string", description: "e.g. 12g" }
-      }
+        protein: { type: "number", description: "Protein in grams (number only, e.g. 24)" },
+        carbs: { type: "number", description: "Carbs in grams (number only, e.g. 35)" },
+        fat: { type: "number", description: "Fat in grams (number only, e.g. 12)" }
+      },
+      required: ["protein", "carbs", "fat"]
     },
     ingredients: { type: "array", items: { type: "string" } },
     instructions: { type: "array", items: { type: "string" } },
@@ -84,7 +125,7 @@ export const RECIPE_SCHEMA = {
       }
     }
   },
-  required: ["title", "servings", "calories", "ingredients", "instructions", "usedIngredients"]
+  required: ["title", "servings", "calories", "nutrition", "ingredients", "instructions", "usedIngredients"]
 };
 
 export const fridgePalClient = {
@@ -126,8 +167,9 @@ export const fridgePalClient = {
         const record = {
           id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
           quantity: newItem.quantity ?? 1,
-          unit: newItem.unit || "units",
-          status: "active",
+          unit: newItem.unit || "count",
+          category: newItem.category || "Pantry",
+          status: newItem.status || "active",
           ...newItem,
           updated_date: new Date().toISOString()
         };
@@ -140,9 +182,10 @@ export const fridgePalClient = {
         const items = getStoredItems();
         const created = newItems.map((item) => ({
           id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-          status: "active",
+          status: item.status || "active",
           quantity: item.quantity ?? 1,
-          unit: item.unit || "units",
+          unit: item.unit || "count",
+          category: item.category || "Pantry",
           ...item,
           updated_date: new Date().toISOString()
         }));
@@ -153,19 +196,40 @@ export const fridgePalClient = {
 
       async deductIngredients(usedList = []) {
         const items = getStoredItems();
+        const now = new Date().toISOString();
+
         for (const used of usedList) {
           const item = items.find((i) => i.id === used.itemId);
           if (item) {
-            const remaining = Number((item.quantity - used.amountUsed).toFixed(1));
-            if (remaining <= 0) {
-              item.quantity = 0;
-              item.status = "consumed";
-            } else {
-              item.quantity = remaining;
+            const amountDeducted = Math.min(Number(item.quantity) || 0, Number(used.amountUsed) || 0);
+
+            if (amountDeducted > 0) {
+              // 1. Log a historical entry so the Insights Tab reflects recipe cooking
+              items.push({
+                id: `used-log-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                name: item.name,
+                quantity: amountDeducted,
+                unit: item.unit || "count",
+                category: item.category || "Pantry",
+                expiration_date: item.expiration_date,
+                status: "used",
+                updated_date: now
+              });
+
+              // 2. Adjust remaining quantity on active fridge item
+              const remaining = Number((item.quantity - amountDeducted).toFixed(1));
+              if (remaining <= 0) {
+                item.quantity = 0;
+                item.status = "archived";
+              } else {
+                item.quantity = remaining;
+                item.status = "active";
+              }
+              item.updated_date = now;
             }
-            item.updated_date = new Date().toISOString();
           }
         }
+
         saveStoredItems(items);
         return items.filter((i) => i.status === "active");
       }
@@ -239,17 +303,18 @@ export const fridgePalClient = {
         }
 
         // --- Demo Fallback ---
-        await new Promise((r) => setTimeout(r, 1000));
+        await new Promise((r) => setTimeout(r, 600));
 
+        // Fallback for recipe generation
         if (prompt.includes("recipe") || prompt.includes("cooking")) {
           return {
             title: "Single-Skillet Cheesy Scramble",
             servings: 1,
             calories: 340,
             nutrition: {
-              protein: "22g",
-              carbs: "6g",
-              fat: "24g"
+              protein: 22,
+              carbs: 6,
+              fat: 24
             },
             ingredients: [
               "2 large Eggs, beaten",
@@ -271,17 +336,91 @@ export const fridgePalClient = {
           };
         }
 
-        if (prompt.includes("grocery list")) {
+        // Intelligent local text parser for Voice & Quick Add inputs
+        if (prompt.includes("grocery list") || prompt.includes("spoke") || prompt.includes("voice")) {
+          const match = prompt.match(/spoke this grocery list:\s*"([^"]+)"/i) || prompt.match(/"([^"]+)"/);
+          const spoken = match ? match[1] : "";
           const today = new Date().toISOString().split("T")[0];
+
+          if (spoken) {
+            const segments = spoken
+              .split(/,\s*|\s+and\s+|\s*\+\s*/i)
+              .map((s) => s.trim())
+              .filter(Boolean);
+
+            const parsedItems = segments.map((seg) => {
+              const lower = seg.toLowerCase();
+              let qty = 1;
+              let unit = "count";
+              let category = "Produce";
+
+              const numMatch = lower.match(/\b(\d+(\.\d+)?|a|one|two|three|four|five|six|half|dozen)\b/i);
+              if (numMatch) {
+                const word = numMatch[1].toLowerCase();
+                const wordMap = { a: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, half: 0.5, dozen: 12 };
+                qty = wordMap[word] !== undefined ? wordMap[word] : parseFloat(word) || 1;
+              }
+
+              if (lower.includes("egg")) {
+                unit = "eggs";
+                category = "Dairy/Alts";
+                if (lower.includes("carton") || lower.includes("dozen")) qty = 12;
+              } else if (lower.includes("milk")) {
+                unit = "cups";
+                category = "Dairy/Alts";
+                if (qty === 1 && !lower.includes("cup")) qty = 4;
+              } else if (lower.includes("cheese")) {
+                unit = "oz";
+                category = "Dairy/Alts";
+                if (qty === 1 && !lower.includes("oz")) qty = 8;
+              } else if (lower.includes("bread")) {
+                unit = "slices";
+                category = "Bakery";
+                if (lower.includes("loaf")) qty = 16;
+              } else if (lower.includes("tortilla")) {
+                unit = "tortillas";
+                category = "Bakery";
+                if (lower.includes("pack")) qty = 10;
+              } else if (lower.includes("bean")) {
+                unit = "cans";
+                category = "Pantry";
+              } else if (lower.includes("chicken") || lower.includes("beef") || lower.includes("meat")) {
+                unit = "oz";
+                category = "Meat/Seafood";
+              } else if (lower.includes("chocolate")) {
+                unit = "bar";
+                category = "Snacks";
+              }
+
+              const cleanName = seg
+                .replace(/\b(\d+|a|an|one|two|three|four|five|six|half|dozen)\b/gi, "")
+                .replace(/\b(carton of|loaf of|pack of|head of|bag of|bottle of|can of|slices of|cups of|oz of|ounces of)\b/gi, "")
+                .trim();
+
+              const capitalized = cleanName ? cleanName.charAt(0).toUpperCase() + cleanName.slice(1) : seg;
+
+              return {
+                name: capitalized,
+                quantity: qty,
+                unit: unit,
+                category: category,
+                expiration_date: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0]
+              };
+            });
+
+            if (parsedItems.length > 0) {
+              return { items: parsedItems };
+            }
+          }
+
           return {
             items: [
-              { name: "Bread", quantity: 16, unit: "slices", expiration_date: today },
-              { name: "Tomatoes", quantity: 4, unit: "count", expiration_date: today },
-              { name: "Eggs", quantity: 12, unit: "eggs", expiration_date: today }
+              { name: "Bananas", quantity: 4, unit: "count", category: "Produce", expiration_date: today }
             ]
           };
         }
 
+        // Receipt scan fallback
         return {
           items: [
             { name: "Eggs", quantity: 12, unit: "eggs", category: "Dairy/Alts", shelf_life_days: 21 },

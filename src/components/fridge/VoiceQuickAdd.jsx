@@ -42,29 +42,61 @@ export default function VoiceQuickAdd({ onAdded }) {
   const parseItems = async (text) => {
     setParsing(true);
     const today = new Date().toISOString().split("T")[0];
-    const result = await fridgePalClient.integrations.Core.InvokeLLM({
-      prompt: `A user spoke this grocery list: "${text}". Extract each distinct item with its quantity (default 1) and estimate a sensible expiration date (ISO format YYYY-MM-DD) based on typical shelf life starting from today (${today}). Examples: bread ~7 days, milk ~7 days, eggs ~21 days, fresh veg ~5 days, cheese ~14 days.`,
-      response_json_schema: {
-        type: "object",
-        properties: {
-          items: {
-            type: "array",
+
+    try {
+      const result = await fridgePalClient.integrations.Core.InvokeLLM({
+        prompt: `The user spoke this grocery list: "${text}".
+Parse ONLY the items the user explicitly mentioned. Do NOT invent new foods.
+
+RULES:
+- Clean up spoken words: e.g. "two bananas and some milk" -> Bananas (qty: 2, unit: "count"), Milk (qty: 4, unit: "cups").
+- Translate packaging to usable culinary units:
+  * "carton of eggs" -> qty: 12, unit: "eggs"
+  * "loaf of bread" -> qty: 16, unit: "slices"
+  * "pack of tortillas" -> qty: 10, unit: "tortillas"
+  * "block of cheese" -> qty: 8, unit: "oz"
+  * "bottle/carton of milk" -> qty: 4, unit: "cups"
+  * "can of beans/tuna" -> qty: 1, unit: "cans"
+  * "chocolate bar" -> qty: 1, unit: "bar"
+  * "apples/oranges/bananas/onions" -> unit: "count"
+- Valid units: 'eggs', 'cups', 'oz', 'lbs', 'slices', 'tortillas', 'cans', 'bar', 'jar', 'bottle', 'count'
+- Categories: 'Produce', 'Dairy/Alts', 'Meat/Seafood', 'Bakery', 'Pantry', 'Snacks', 'Frozen'
+- Expiration: Sensible ISO date (YYYY-MM-DD) based on today (${today}).`,
+        response_json_schema: {
+          type: "object",
+          properties: {
             items: {
-              type: "object",
-              properties: {
-                name: { type: "string" },
-                quantity: { type: "number" },
-                expiration_date: { type: "string" },
-              },
-              required: ["name", "quantity", "expiration_date"],
-            },
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  name: { type: "string" },
+                  quantity: { type: "number" },
+                  unit: {
+                    type: "string",
+                    enum: ["eggs", "cups", "oz", "lbs", "slices", "tortillas", "cans", "bar", "jar", "bottle", "count"]
+                  },
+                  category: {
+                    type: "string",
+                    enum: ["Produce", "Dairy/Alts", "Meat/Seafood", "Bakery", "Pantry", "Snacks", "Frozen"]
+                  },
+                  expiration_date: { type: "string" }
+                },
+                required: ["name", "quantity", "unit", "category", "expiration_date"]
+              }
+            }
           },
-        },
-        required: ["items"],
-      },
-    });
-    setParsed(result.items || []);
-    setParsing(false);
+          required: ["items"]
+        }
+      });
+
+      console.log("Voice parse result:", result);
+      setParsed(result?.items || []);
+    } catch (err) {
+      console.error("Voice parse error:", err);
+    } finally {
+      setParsing(false);
+    }
   };
 
   const confirm = async () => {
@@ -74,6 +106,8 @@ export default function VoiceQuickAdd({ onAdded }) {
       parsed.map((i) => ({
         name: i.name,
         quantity: Number(i.quantity) || 1,
+        unit: i.unit || "count",
+        category: i.category || "Pantry",
         expiration_date: i.expiration_date,
         status: "active",
       }))
@@ -131,7 +165,7 @@ export default function VoiceQuickAdd({ onAdded }) {
             <p className="text-stone-500 text-sm italic max-w-sm">"{transcript}"</p>
           )}
 
-          {parsed && (
+          {parsed && parsed.length > 0 && (
             <div className="w-full space-y-4">
               <p className="font-medium text-stone-700">
                 I heard {parsed.length} item{parsed.length > 1 ? "s" : ""} — is this right?
@@ -139,7 +173,7 @@ export default function VoiceQuickAdd({ onAdded }) {
               <div className="flex flex-wrap justify-center gap-2">
                 {parsed.map((i, idx) => (
                   <span key={idx} className="bg-emerald-50 text-emerald-700 rounded-full px-4 py-1.5 text-sm font-medium border border-emerald-200">
-                    {i.quantity}× {i.name}
+                    {i.quantity} {i.unit} {i.name}
                   </span>
                 ))}
               </div>
@@ -154,9 +188,18 @@ export default function VoiceQuickAdd({ onAdded }) {
             </div>
           )}
 
+          {parsed && parsed.length === 0 && !parsing && (
+            <div className="space-y-3">
+              <p className="text-stone-500 text-sm">Couldn't detect any food items in what you said.</p>
+              <Button variant="outline" className="rounded-full" onClick={tryAgain}>
+                Try Again
+              </Button>
+            </div>
+          )}
+
           {!parsed && !listening && !parsing && !transcript && (
             <p className="text-stone-500 text-sm max-w-xs">
-              Tap the mic and say something like "2 loaves of bread, 3 tomatoes, and 1 carton of eggs."
+              Tap the mic and say something like "1 carton of eggs, 8 ounces of cheddar, and 3 apples."
             </p>
           )}
         </div>

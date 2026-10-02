@@ -21,7 +21,6 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [celebrate, setCelebrate] = useState(false);
 
-  // Persist meals cooked and cooking XP earned from used ingredient quantities
   const [recipeCount, setRecipeCount] = useState(() => {
     return Number(localStorage.getItem("fridgepal_recipe_count") || 0);
   });
@@ -39,31 +38,98 @@ export default function Home() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const fireConfetti = () => {
-    confetti({ particleCount: 90, spread: 70, origin: { y: 0.7 }, colors: ["#34d399", "#fbbf24", "#fb7185", "#60a5fa"] });
+    confetti({
+      particleCount: 90,
+      spread: 70,
+      origin: { y: 0.7 },
+      colors: ["#34d399", "#fbbf24", "#fb7185", "#60a5fa"],
+    });
   };
 
   const consume = async (item, amount) => {
-    if (amount >= item.quantity) {
-      await fridgePalClient.entities.GroceryItem.update(item.id, { status: "used" });
-      fireConfetti();
-      setCelebrate(true);
-      setTimeout(() => setCelebrate(false), 1800);
+    const currentQty = Number(item.quantity) || 0;
+    const deductQty =
+      amount !== undefined && !isNaN(Number(amount)) && Number(amount) > 0
+        ? Number(amount)
+        : currentQty;
+    const remaining = Math.round((currentQty - deductQty) * 100) / 100;
+
+    // 1. Log the exact used portion to history with status "used" and its real quantity
+    await fridgePalClient.entities.GroceryItem.create({
+      name: item.name,
+      quantity: deductQty,
+      unit: item.unit || "count",
+      category: item.category || "Pantry",
+      expiration_date: item.expiration_date,
+      status: "used",
+    });
+
+    // 2. Update fridge item: archive if finished, keep active if portions remain
+    if (remaining <= 0) {
+      await fridgePalClient.entities.GroceryItem.update(item.id, {
+        quantity: 0,
+        status: "archived",
+      });
     } else {
-      await fridgePalClient.entities.GroceryItem.update(item.id, { quantity: item.quantity - amount });
+      await fridgePalClient.entities.GroceryItem.update(item.id, {
+        quantity: remaining,
+        status: "active",
+      });
     }
+
+    const earnedXP = Math.max(2, Math.round(deductQty * 5));
+    setCookingXP((prev) => {
+      const next = prev + earnedXP;
+      localStorage.setItem("fridgepal_cooking_xp", String(next));
+      return next;
+    });
+
     load();
+    fireConfetti();
+    setCelebrate(true);
+    setTimeout(() => setCelebrate(false), 1800);
   };
 
-  const markWasted = async (item) => {
-    await fridgePalClient.entities.GroceryItem.update(item.id, { status: "wasted" });
+  const markWasted = async (item, amount) => {
+    const currentQty = Number(item.quantity) || 0;
+    const wastedQty =
+      amount !== undefined && !isNaN(Number(amount)) && Number(amount) > 0
+        ? Number(amount)
+        : currentQty;
+    const remaining = Math.round((currentQty - wastedQty) * 100) / 100;
+
+    // 1. Log the exact wasted portion to history with status "wasted" and its real quantity
+    await fridgePalClient.entities.GroceryItem.create({
+      name: item.name,
+      quantity: wastedQty,
+      unit: item.unit || "count",
+      category: item.category || "Pantry",
+      expiration_date: item.expiration_date,
+      status: "wasted",
+    });
+
+    // 2. Update fridge item: archive if finished, keep active if portions remain
+    if (remaining <= 0) {
+      await fridgePalClient.entities.GroceryItem.update(item.id, {
+        quantity: 0,
+        status: "archived",
+      });
+    } else {
+      await fridgePalClient.entities.GroceryItem.update(item.id, {
+        quantity: remaining,
+        status: "active",
+      });
+    }
+
     load();
   };
 
   const handleRecipeCooked = (quantityUsed) => {
-    // 5 XP for every unit of ingredient put to use + 10 XP base meal bonus
     const earnedXP = Math.max(10, Math.round(quantityUsed * 5) + 10);
 
     setRecipeCount((prev) => {
@@ -104,9 +170,9 @@ export default function Home() {
       </div>
 
       <main className="max-w-2xl mx-auto px-6 pb-20 space-y-5">
-        <ProgressTracker 
-          history={history} 
-          recipeCount={recipeCount} 
+        <ProgressTracker
+          history={history}
+          recipeCount={recipeCount}
           cookingXP={cookingXP}
         />
 
@@ -114,9 +180,24 @@ export default function Home() {
 
         <Tabs defaultValue="fridge" className="w-full">
           <TabsList className="grid grid-cols-3 rounded-full bg-white/80 backdrop-blur p-1.5 shadow-sm border border-stone-200">
-            <TabsTrigger value="fridge" className="rounded-full data-[state=active]:bg-emerald-500 data-[state=active]:text-white font-medium">🧊 My Fridge</TabsTrigger>
-            <TabsTrigger value="recipe" className="rounded-full data-[state=active]:bg-emerald-500 data-[state=active]:text-white font-medium">🍳 Recipe</TabsTrigger>
-            <TabsTrigger value="insights" className="rounded-full data-[state=active]:bg-emerald-500 data-[state=active]:text-white font-medium">📊 Insights</TabsTrigger>
+            <TabsTrigger
+              value="fridge"
+              className="rounded-full data-[state=active]:bg-emerald-500 data-[state=active]:text-white font-medium"
+            >
+              🧊 My Fridge
+            </TabsTrigger>
+            <TabsTrigger
+              value="recipe"
+              className="rounded-full data-[state=active]:bg-emerald-500 data-[state=active]:text-white font-medium"
+            >
+              🍳 Recipe
+            </TabsTrigger>
+            <TabsTrigger
+              value="insights"
+              className="rounded-full data-[state=active]:bg-emerald-500 data-[state=active]:text-white font-medium"
+            >
+              📊 Insights
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="fridge" className="mt-5 space-y-3">
@@ -130,17 +211,19 @@ export default function Home() {
             ) : (
               <AnimatePresence>
                 {items.map((item) => (
-                  <ItemCard key={item.id} item={item} onConsume={consume} onMarkWasted={markWasted} />
+                  <ItemCard
+                    key={item.id}
+                    item={item}
+                    onConsume={consume}
+                    onMarkWasted={markWasted}
+                  />
                 ))}
               </AnimatePresence>
             )}
           </TabsContent>
 
           <TabsContent value="recipe" className="mt-5">
-            <RecipeTab 
-              items={items} 
-              onItemsUpdated={handleRecipeCooked}
-            />
+            <RecipeTab items={items} onItemsUpdated={handleRecipeCooked} />
           </TabsContent>
 
           <TabsContent value="insights" className="mt-5">
@@ -157,7 +240,7 @@ export default function Home() {
             exit={{ opacity: 0, scale: 0.9 }}
             className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-emerald-600 text-white px-6 py-3 rounded-full shadow-xl font-semibold flex items-center gap-2 z-50"
           >
-            🎉 Great job! Ingredients used and EXP gained!
+            🎉 Great job! Ingredients updated and EXP gained!
           </motion.div>
         )}
       </AnimatePresence>
