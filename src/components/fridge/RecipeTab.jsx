@@ -1,200 +1,269 @@
 import React, { useState } from "react";
-import { fridgePalClient } from "@/api/fridgePalClient";
+import { fridgePalClient, RECIPE_SCHEMA } from "@/api/fridgePalClient";
 import { Button } from "@/components/ui/button";
-import { ChefHat, Shuffle, Flame, User, CheckCircle2 } from "lucide-react";
-import SeasoningsPanel from "@/components/fridge/SeasoningsPanel";
+import { Sparkles, Utensils, Check, Loader2, Shuffle, Flame, Dumbbell, Wheat, Droplets } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 
-export default function RecipeTab({ items, onItemsUpdated }) {
+const CUISINE_STYLES = [
+  "Crispy Pan Stir-Fry or Sauté",
+  "Warm Grains & Roasted Veggie Bowl",
+  "Savory Scramble, Omelet, or Skillet Hash",
+  "Toasted Wrap, Sandwich, or Loaded Flatbread",
+  "Hearty Stew, Curry, or Simmered Soup",
+  "Fresh Tossed Crisp Salad with Warm Protein/Toppings"
+];
+
+export default function RecipeTab({ items = [], onItemsUpdated }) {
   const [recipe, setRecipe] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [seasoningNames, setSeasoningNames] = useState([]);
-  const [isDeducted, setIsDeducted] = useState(false);
+  const [cooking, setCooking] = useState(false);
+  const [cooked, setCooked] = useState(false);
+  const [previousRecipes, setPreviousRecipes] = useState([]);
 
-  const generate = async () => {
-    if (items.length === 0) return;
+  const activeItems = items.filter((i) => i.status === "active" && Number(i.quantity) > 0);
+
+  const generateRecipe = async (isShuffle = false) => {
+    if (activeItems.length === 0) return;
     setLoading(true);
-    setIsDeducted(false);
+    setCooked(false);
 
-    const inventoryContext = items
-      .map((i) => `- [ID: ${i.id}] ${i.name} (Available: ${i.quantity} ${i.unit || "units"})`)
+    const chosenStyle = CUISINE_STYLES[Math.floor(Math.random() * CUISINE_STYLES.length)];
+
+    const inventoryList = activeItems
+      .map(
+        (i) =>
+          `ID: "${i.id}" | Name: "${i.name}" | Available: ${i.quantity} ${i.unit || "count"} | Category: ${i.category}`
+      )
       .join("\n");
 
-    const seasonings = seasoningNames.length ? seasoningNames.join(", ") : "none listed";
+    const previousTitles = previousRecipes.map((r) => `"${r.title}"`).join(", ");
+    const previousUsedIds = previousRecipes
+      .flatMap((r) => (r.usedIngredients || []).map((u) => u.itemId))
+      .filter(Boolean);
 
-    const result = await fridgePalClient.integrations.Core.InvokeLLM({
-      prompt: `You are a home-cooking assistant and nutritionist.
-A user has these specific fridge items with their IDs and quantities:
-${inventoryContext}
+    const diversityDirective = isShuffle && previousRecipes.length > 0
+      ? `\nSHUFFLE REQUIREMENT:
+The user clicked "Shuffle" because they want a completely different meal.
+- AVOID duplicating these previously generated recipes: [${previousTitles}].
+- Avoid heavily relying on previously used item IDs if alternatives exist: [${previousUsedIds.join(", ")}].
+- Make this meal in the style of: "${chosenStyle}".
+- Select a fresh subset of ingredients from the fridge that feel novel compared to the last suggestion.`
+      : `\nCUISINE THEME: Craft this single-serving dish in the style of: "${chosenStyle}".`;
 
-They also have these seasonings and pantry staples available: ${seasonings}.
+    try {
+      const result = await fridgePalClient.integrations.Core.InvokeLLM({
+        prompt: `You are an expert culinary nutritionist creating a single-serving meal using the user's available fridge items.
 
-Suggest ONE realistic, quick, single-serving recipe scaled for EXACTLY 1 PERSON.
-Use realistic single-serving amounts (for example: 2 eggs out of 12, 0.75 cups of broccoli, 2 oz of cheese).
-Do NOT consume the whole container if only a portion is needed for 1 serving.
+AVAILABLE FRIDGE ITEMS:
+${inventoryList}
+${diversityDirective}
 
-IMPORTANT: For calories and macros, provide ONLY pure numeric values (e.g. 24, not "24g").
+STRICT CRITERIA & UNIT CONVERSION RULES:
+1. Feature a distinct combination of ingredients. 
+2. In "usedIngredients", every entry MUST use an exact "itemId" from the list above, with:
+   - "amountUsed": numeric amount used in recipe (e.g. 2, 0.5, 1)
+   - "unitUsed": the culinary unit used (e.g. "cups", "tbsp", "oz", "cans", "gallons", "slices", "eggs")
+   NOTE: If an inventory item is stored in "gallons", you can specify "cups" or "fl oz" in "unitUsed". If an item is in "cans", you can specify "cups" or "cans". Our app converts and deducts automatically.
+3. "servings" MUST be 1.
+4. Calculate realistic macronutrient grams based ONLY on the actual quantities used:
+   - "protein": raw integer in grams
+   - "carbs": raw integer in grams
+   - "fat": raw integer in grams
+5. CRITICAL CALORIE ACCURACY: "calories" MUST equal (protein * 4) + (carbs * 4) + (fat * 9).`,
+        response_json_schema: RECIPE_SCHEMA
+      });
 
-Return:
-1. title
-2. servings (must be 1)
-3. calories (pure integer total for 1 serving)
-4. nutrition breakdown: protein, carbs, and fat as numbers (in grams)
-5. ingredients list for 1 serving (with clear measurements)
-6. instructions (4-6 clear steps)
-7. usedIngredients: an array listing the fridge items used, their exact 'itemId', and the numeric 'amountUsed'.`,
-      response_json_schema: {
-        type: "object",
-        properties: {
-          title: { type: "string" },
-          servings: { type: "number", description: "Must be 1" },
-          calories: { type: "number", description: "Estimated total calories (integer)" },
-          nutrition: {
-            type: "object",
-            properties: {
-              protein: { type: "number", description: "Protein in grams as a number, e.g. 24" },
-              carbs: { type: "number", description: "Carbohydrates in grams as a number, e.g. 35" },
-              fat: { type: "number", description: "Fat in grams as a number, e.g. 12" }
-            },
-            required: ["protein", "carbs", "fat"]
-          },
-          ingredients: { type: "array", items: { type: "string" } },
-          instructions: { type: "array", items: { type: "string" } },
-          usedIngredients: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                itemId: { type: "string", description: "Must match the exact item ID provided" },
-                amountUsed: { type: "number", description: "Number of units used for 1 serving" }
-              },
-              required: ["itemId", "amountUsed"]
-            }
-          }
-        },
-        required: ["title", "servings", "calories", "nutrition", "ingredients", "instructions", "usedIngredients"],
-      },
-    });
+      // Programmatically lock calories to Atwater multipliers
+      if (result && result.nutrition) {
+        const p = Number(result.nutrition.protein) || 0;
+        const c = Number(result.nutrition.carbs) || 0;
+        const f = Number(result.nutrition.fat) || 0;
+        result.calories = Math.round((p * 4) + (c * 4) + (f * 9));
+      }
 
-    setRecipe(result);
-    setLoading(false);
-  };
-
-  const handleDeduct = async () => {
-    if (!recipe?.usedIngredients || isDeducted) return;
-
-    const totalQuantityUsed = recipe.usedIngredients.reduce(
-      (sum, item) => sum + (Number(item.amountUsed) || 0),
-      0
-    );
-
-    await fridgePalClient.entities.GroceryItem.deductIngredients(recipe.usedIngredients);
-    setIsDeducted(true);
-
-    if (onItemsUpdated) {
-      onItemsUpdated(totalQuantityUsed);
+      setRecipe(result);
+      if (result?.title) {
+        setPreviousRecipes((prev) => [result, ...prev].slice(0, 5));
+      }
+    } catch (err) {
+      console.error("Recipe generation error:", err);
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Helper to safely format macro numbers
-  const cleanMacro = (val) => {
-    if (val === undefined || val === null) return null;
-    const num = typeof val === "number" ? val : parseInt(String(val).replace(/[^0-9]/g, ""), 10);
-    return isNaN(num) ? null : `${num}g`;
+  const handleCook = async () => {
+    if (!recipe || !recipe.usedIngredients) return;
+    setCooking(true);
+
+    try {
+      await fridgePalClient.entities.GroceryItem.deductIngredients(recipe.usedIngredients);
+
+      const totalQuantityUsed = (recipe.usedIngredients || []).reduce(
+        (sum, item) => sum + (Number(item.amountUsed) || 0),
+        0
+      );
+
+      onItemsUpdated?.(totalQuantityUsed);
+      setCooked(true);
+    } catch (err) {
+      console.error("Deduction error:", err);
+    } finally {
+      setCooking(false);
+    }
   };
 
   return (
-    <div className="space-y-5">
-      <SeasoningsPanel onSeasoningsChange={setSeasoningNames} />
-
-      {items.length === 0 ? (
-        <div className="text-center py-12 text-stone-500">
-          Add a few fridge items to get a recipe idea.
-        </div>
-      ) : !recipe ? (
-        <div className="flex flex-col items-center justify-center py-12 gap-4 text-center">
-          <ChefHat className="w-10 h-10 text-emerald-500" />
-          <p className="text-stone-600 max-w-xs">
-            Get a realistic single-serving recipe using your fridge items plus seasonings on hand.
+    <div className="bg-white rounded-3xl border border-stone-200 p-6 shadow-sm space-y-6">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <h3 className="text-lg font-bold text-stone-800">Smart Recipe Generator</h3>
+          <p className="text-xs text-stone-400">
+            Crafts dynamic single-portion meals from your available fridge items
           </p>
-          <Button onClick={generate} disabled={loading} className="rounded-full bg-emerald-600 hover:bg-emerald-700 px-6">
-            {loading ? "Cooking up ideas..." : "Cook Something"}
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          {recipe && (
+            <Button
+              variant="outline"
+              onClick={() => generateRecipe(true)}
+              disabled={loading || activeItems.length === 0}
+              className="rounded-full border-stone-200 text-stone-700 hover:bg-stone-50 gap-1.5 font-medium text-xs h-9 px-3.5"
+            >
+              <Shuffle className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+              <span>Shuffle</span>
+            </Button>
+          )}
+
+          <Button
+            onClick={() => generateRecipe(false)}
+            disabled={loading || activeItems.length === 0}
+            className="rounded-full bg-emerald-600 hover:bg-emerald-700 text-white gap-2 font-semibold shadow-sm text-xs h-9 px-4"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Cooking...
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-3.5 h-3.5" /> Cook Something
+              </>
+            )}
           </Button>
         </div>
-      ) : (
-        <div className="bg-white rounded-2xl shadow-sm border border-stone-100 p-6 space-y-4">
-          <div>
-            <h3 className="text-xl font-semibold text-stone-800">{recipe.title}</h3>
-            
-            {/* Calorie & Single Serving Badge */}
-            {(recipe.calories || recipe.nutrition) && (
-              <div className="flex flex-wrap items-center gap-3 mt-2 p-2.5 bg-emerald-50 border border-emerald-100/80 rounded-xl text-emerald-900 text-xs">
-                {recipe.calories && (
-                  <div className="flex items-center gap-1.5 font-semibold text-sm">
-                    <Flame className="w-4 h-4 text-emerald-600 fill-emerald-600" />
-                    <span>{recipe.calories} kcal</span>
-                  </div>
-                )}
+      </div>
 
-                <div className="flex items-center gap-1 font-medium text-emerald-800 border-l border-emerald-200 pl-3">
-                  <User className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>1 serving</span>
-                </div>
-
-                {recipe.nutrition && (
-                  <div className="flex items-center gap-2.5 border-l border-emerald-200 pl-3 text-emerald-800">
-                    {cleanMacro(recipe.nutrition.protein) && (
-                      <span>Protein: <b>{cleanMacro(recipe.nutrition.protein)}</b></span>
-                    )}
-                    {cleanMacro(recipe.nutrition.carbs) && (
-                      <span>Carbs: <b>{cleanMacro(recipe.nutrition.carbs)}</b></span>
-                    )}
-                    {cleanMacro(recipe.nutrition.fat) && (
-                      <span>Fat: <b>{cleanMacro(recipe.nutrition.fat)}</b></span>
-                    )}
-                  </div>
-                )}
-
-                <span className="ml-auto text-[10px] text-emerald-600/70 italic">
-                  *Est.
-                </span>
-              </div>
-            )}
-          </div>
-
-          <div>
-            <p className="text-sm font-medium text-stone-500 mb-1">Ingredients (1 Serving)</p>
-            <ul className="list-disc list-inside text-stone-700 space-y-0.5">
-              {recipe.ingredients.map((ing, idx) => <li key={idx}>{ing}</li>)}
-            </ul>
-          </div>
-
-          <div>
-            <p className="text-sm font-medium text-stone-500 mb-1">Instructions</p>
-            <ol className="list-decimal list-inside text-stone-700 space-y-1">
-              {recipe.instructions.map((step, idx) => <li key={idx}>{step}</li>)}
-            </ol>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-stone-100">
-            <Button
-              onClick={handleDeduct}
-              disabled={isDeducted}
-              className={`rounded-full gap-2 transition-all ${
-                isDeducted
-                  ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-100 cursor-default"
-                  : "bg-emerald-600 hover:bg-emerald-700 text-white"
-              }`}
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              {isDeducted ? "Ingredients Deducted!" : "I Made This! (Deduct Ingredients)"}
-            </Button>
-
-            <Button onClick={generate} disabled={loading} variant="outline" className="rounded-full gap-2">
-              <Shuffle className="w-4 h-4" /> {loading ? "Shuffling..." : "Shuffle Recipe"}
-            </Button>
-          </div>
+      {activeItems.length === 0 && (
+        <div className="text-center py-8 text-stone-500 text-sm">
+          Your fridge has no active items. Scan or add groceries to start cooking!
         </div>
       )}
+
+      <AnimatePresence mode="wait">
+        {recipe && (
+          <motion.div
+            key={recipe.title}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="space-y-5 pt-2"
+          >
+            <div className="border-b border-stone-100 pb-5">
+              <h4 className="text-xl font-extrabold text-stone-800 mb-3">{recipe.title}</h4>
+
+              {/* Macro Cards */}
+              <div className="grid grid-cols-4 gap-2 pt-1">
+                <div className="bg-gradient-to-br from-emerald-500 to-teal-600 text-white rounded-2xl p-2.5 flex flex-col items-center justify-center shadow-sm shadow-emerald-200">
+                  <div className="flex items-center gap-1 opacity-90 text-[10px] font-bold uppercase tracking-wider">
+                    <Flame className="w-3 h-3" /> Cals
+                  </div>
+                  <span className="text-lg font-black mt-0.5">{recipe.calories}</span>
+                  <span className="text-[10px] font-medium opacity-80">kcal</span>
+                </div>
+
+                <div className="bg-gradient-to-br from-blue-500 to-indigo-600 text-white rounded-2xl p-2.5 flex flex-col items-center justify-center shadow-sm shadow-blue-200">
+                  <div className="flex items-center gap-1 opacity-90 text-[10px] font-bold uppercase tracking-wider">
+                    <Dumbbell className="w-3 h-3" /> Protein
+                  </div>
+                  <span className="text-lg font-black mt-0.5">{recipe.nutrition?.protein || 0}</span>
+                  <span className="text-[10px] font-medium opacity-80">grams</span>
+                </div>
+
+                <div className="bg-gradient-to-br from-amber-400 to-orange-500 text-white rounded-2xl p-2.5 flex flex-col items-center justify-center shadow-sm shadow-amber-200">
+                  <div className="flex items-center gap-1 opacity-90 text-[10px] font-bold uppercase tracking-wider">
+                    <Wheat className="w-3 h-3" /> Carbs
+                  </div>
+                  <span className="text-lg font-black mt-0.5">{recipe.nutrition?.carbs || 0}</span>
+                  <span className="text-[10px] font-medium opacity-80">grams</span>
+                </div>
+
+                <div className="bg-gradient-to-br from-rose-400 to-pink-600 text-white rounded-2xl p-2.5 flex flex-col items-center justify-center shadow-sm shadow-rose-200">
+                  <div className="flex items-center gap-1 opacity-90 text-[10px] font-bold uppercase tracking-wider">
+                    <Droplets className="w-3 h-3" /> Fats
+                  </div>
+                  <span className="text-lg font-black mt-0.5">{recipe.nutrition?.fat || 0}</span>
+                  <span className="text-[10px] font-medium opacity-80">grams</span>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h5 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-2">
+                Ingredients Used
+              </h5>
+              <ul className="space-y-1.5 text-sm text-stone-700">
+                {recipe.ingredients.map((ing, i) => (
+                  <li key={i} className="flex items-start gap-2">
+                    <span className="text-emerald-500 font-bold">•</span>
+                    <span>{ing}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div>
+              <h5 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-2">
+                Instructions
+              </h5>
+              <ol className="space-y-2 text-sm text-stone-700">
+                {recipe.instructions.map((step, i) => (
+                  <li key={i} className="flex gap-2">
+                    <span className="font-bold text-emerald-600 min-w-[20px]">{i + 1}.</span>
+                    <span>{step}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+
+            <div className="pt-2">
+              <Button
+                onClick={handleCook}
+                disabled={cooking || cooked}
+                className={`w-full rounded-2xl h-11 font-semibold gap-2 ${
+                  cooked
+                    ? "bg-stone-100 text-stone-400 cursor-not-allowed"
+                    : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                }`}
+              >
+                {cooking ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" /> Deducting ingredients...
+                  </>
+                ) : cooked ? (
+                  <>
+                    <Check className="w-4 h-4 text-emerald-600" /> Cooked & Deducted!
+                  </>
+                ) : (
+                  <>
+                    <Utensils className="w-4 h-4" /> I Cooked This (Deduct from Fridge)
+                  </>
+                )}
+              </Button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

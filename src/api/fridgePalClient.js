@@ -1,5 +1,85 @@
 const STORAGE_KEY = "fridgepal_grocery_items";
 
+// Conversion tables
+const VOLUME_TO_CUPS = {
+  gallon: 16,
+  gallons: 16,
+  gal: 16,
+  quart: 4,
+  quarts: 4,
+  qt: 4,
+  pint: 2,
+  pints: 2,
+  pt: 2,
+  cup: 1,
+  cups: 1,
+  c: 1,
+  "fl oz": 0.125,
+  floz: 0.125,
+  tablespoon: 1 / 16,
+  tablespoons: 1 / 16,
+  tbsp: 1 / 16,
+  tbs: 1 / 16,
+  teaspoon: 1 / 48,
+  teaspoons: 1 / 48,
+  tsp: 1 / 48,
+};
+
+const WEIGHT_TO_OZ = {
+  lb: 16,
+  lbs: 16,
+  pound: 16,
+  pounds: 16,
+  oz: 1,
+  ounce: 1,
+  ounces: 1,
+  g: 0.035274,
+  gram: 0.035274,
+  grams: 0.035274,
+};
+
+/**
+ * Converts an amount from one culinary unit to another.
+ * Handles volume-to-volume, weight-to-weight, and food-container approximations.
+ */
+function convertUnits(amount, fromUnitRaw, toUnitRaw, itemName = "") {
+  if (!amount || amount <= 0) return 0;
+  const from = (fromUnitRaw || "").toLowerCase().trim();
+  const to = (toUnitRaw || "").toLowerCase().trim();
+  const item = (itemName || "").toLowerCase().trim();
+
+  if (from === to) return amount;
+
+  // 1. Can / container conversions (e.g. 1 can of beans ≈ 1.5 cups)
+  if (from === "cans" || from === "can") {
+    if (VOLUME_TO_CUPS[to] !== undefined) {
+      const totalCupsInCans = amount * 1.5;
+      return totalCupsInCans / VOLUME_TO_CUPS[to];
+    }
+  }
+  if (to === "cans" || to === "can") {
+    if (VOLUME_TO_CUPS[from] !== undefined) {
+      const totalCupsUsed = amount * VOLUME_TO_CUPS[from];
+      return totalCupsUsed / 1.5; // e.g. 0.5 cup beans / 1.5 = 0.33 can
+    }
+  }
+
+  // 2. Volume-to-Volume conversions (e.g. Gallons <-> Cups <-> Tbsp)
+  if (VOLUME_TO_CUPS[from] !== undefined && VOLUME_TO_CUPS[to] !== undefined) {
+    const cups = amount * VOLUME_TO_CUPS[from];
+    return cups / VOLUME_TO_CUPS[to];
+  }
+
+  // 3. Weight-to-Weight conversions (e.g. Lbs <-> Oz <-> Grams)
+  if (WEIGHT_TO_OZ[from] !== undefined && WEIGHT_TO_OZ[to] !== undefined) {
+    const oz = amount * WEIGHT_TO_OZ[from];
+    return oz / WEIGHT_TO_OZ[to];
+  }
+
+  // 4. Fallback if incompatible or same category
+  return amount;
+}
+
 const DEFAULT_ITEMS = [
   {
     id: "item-1",
@@ -34,9 +114,9 @@ const DEFAULT_ITEMS = [
   {
     id: "item-4",
     name: "Milk",
-    quantity: 4,
-    unit: "cups",
-    expiration_date: new Date(Date.now() + 3 * 86400000).toISOString().split("T")[0],
+    quantity: 1,
+    unit: "gallons",
+    expiration_date: new Date(Date.now() + 6 * 86400000).toISOString().split("T")[0],
     status: "active",
     category: "Dairy/Alts",
     updated_date: new Date().toISOString()
@@ -53,32 +133,12 @@ const DEFAULT_ITEMS = [
   },
   {
     id: "item-6",
-    name: "Flour Tortillas",
-    quantity: 10,
-    unit: "tortillas",
-    expiration_date: new Date(Date.now() + 12 * 86400000).toISOString().split("T")[0],
-    status: "active",
-    category: "Bakery",
-    updated_date: new Date().toISOString()
-  },
-  {
-    id: "item-7",
     name: "Black Beans",
     quantity: 2,
     unit: "cans",
     expiration_date: new Date(Date.now() + 60 * 86400000).toISOString().split("T")[0],
     status: "active",
     category: "Pantry",
-    updated_date: new Date().toISOString()
-  },
-  {
-    id: "item-8",
-    name: "Dark Chocolate",
-    quantity: 1,
-    unit: "bar",
-    expiration_date: new Date(Date.now() + 45 * 86400000).toISOString().split("T")[0],
-    status: "active",
-    category: "Snacks",
     updated_date: new Date().toISOString()
   }
 ];
@@ -101,13 +161,13 @@ export const RECIPE_SCHEMA = {
   properties: {
     title: { type: "string" },
     servings: { type: "number", description: "Must be 1" },
-    calories: { type: "number", description: "Estimated total calories for this 1 serving" },
+    calories: { type: "number", description: "Estimated total calories calculated strictly as (protein*4) + (carbs*4) + (fat*9)" },
     nutrition: {
       type: "object",
       properties: {
-        protein: { type: "number", description: "Protein in grams (number only, e.g. 24)" },
-        carbs: { type: "number", description: "Carbs in grams (number only, e.g. 35)" },
-        fat: { type: "number", description: "Fat in grams (number only, e.g. 12)" }
+        protein: { type: "number", description: "Protein in grams" },
+        carbs: { type: "number", description: "Carbs in grams" },
+        fat: { type: "number", description: "Fat in grams" }
       },
       required: ["protein", "carbs", "fat"]
     },
@@ -119,9 +179,10 @@ export const RECIPE_SCHEMA = {
         type: "object",
         properties: {
           itemId: { type: "string" },
-          amountUsed: { type: "number" }
+          amountUsed: { type: "number" },
+          unitUsed: { type: "string", description: "Unit used in recipe, e.g. cups, tbsp, oz, cans, gallons" }
         },
-        required: ["itemId", "amountUsed"]
+        required: ["itemId", "amountUsed", "unitUsed"]
       }
     }
   },
@@ -201,10 +262,20 @@ export const fridgePalClient = {
         for (const used of usedList) {
           const item = items.find((i) => i.id === used.itemId);
           if (item) {
-            const amountDeducted = Math.min(Number(item.quantity) || 0, Number(used.amountUsed) || 0);
+            // Convert the recipe's unit to the inventory item's native unit
+            const convertedDeduction = convertUnits(
+              Number(used.amountUsed) || 0,
+              used.unitUsed || item.unit,
+              item.unit,
+              item.name
+            );
+
+            // Cap deduction to available quantity and round cleanly
+            const roundedDeduction = Math.round(convertedDeduction * 100) / 100;
+            const amountDeducted = Math.min(Number(item.quantity) || 0, roundedDeduction);
 
             if (amountDeducted > 0) {
-              // 1. Log a historical entry so the Insights Tab reflects recipe cooking
+              // 1. Log historical entry in native units so Insights calculates correctly
               items.push({
                 id: `used-log-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
                 name: item.name,
@@ -216,8 +287,8 @@ export const fridgePalClient = {
                 updated_date: now
               });
 
-              // 2. Adjust remaining quantity on active fridge item
-              const remaining = Number((item.quantity - amountDeducted).toFixed(1));
+              // 2. Adjust remaining inventory on the active fridge item
+              const remaining = Math.round((Number(item.quantity) - amountDeducted) * 100) / 100;
               if (remaining <= 0) {
                 item.quantity = 0;
                 item.status = "archived";
@@ -302,132 +373,82 @@ export const fridgePalClient = {
           console.error("Gemini serverless call failed, falling back to local simulation:", e);
         }
 
-        // --- Demo Fallback ---
         await new Promise((r) => setTimeout(r, 600));
 
-        // Fallback for recipe generation
+        // Recipe fallback with conversion awareness
         if (prompt.includes("recipe") || prompt.includes("cooking")) {
-          return {
-            title: "Single-Skillet Cheesy Scramble",
-            servings: 1,
-            calories: 340,
-            nutrition: {
-              protein: 22,
-              carbs: 6,
-              fat: 24
-            },
-            ingredients: [
-              "2 large Eggs, beaten",
-              "1/2 cup Broccoli florets, chopped small",
-              "2 oz Shredded Cheddar Cheese",
-              "Salt and black pepper to taste"
-            ],
-            instructions: [
-              "Heat a small lightly oiled skillet over medium heat and sauté the chopped broccoli for 2-3 minutes.",
-              "Pour in the beaten eggs and gently stir until soft curds form.",
-              "Sprinkle cheddar cheese over top and let melt for 30 seconds.",
-              "Season with salt and pepper and serve warm."
-            ],
-            usedIngredients: [
-              { itemId: "item-1", amountUsed: 0.5 },
-              { itemId: "item-2", amountUsed: 2 },
-              { itemId: "item-3", amountUsed: 2 }
-            ]
-          };
-        }
+          const currentFridge = getStoredItems().filter((i) => i.status === "active" && Number(i.quantity) > 0);
 
-        // Intelligent local text parser for Voice & Quick Add inputs
-        if (prompt.includes("grocery list") || prompt.includes("spoke") || prompt.includes("voice")) {
-          const match = prompt.match(/spoke this grocery list:\s*"([^"]+)"/i) || prompt.match(/"([^"]+)"/);
-          const spoken = match ? match[1] : "";
-          const today = new Date().toISOString().split("T")[0];
+          if (currentFridge.length > 0) {
+            const shuffled = [...currentFridge].sort(() => 0.5 - Math.random());
+            const chosen = shuffled.slice(0, Math.min(3, shuffled.length));
 
-          if (spoken) {
-            const segments = spoken
-              .split(/,\s*|\s+and\s+|\s*\+\s*/i)
-              .map((s) => s.trim())
-              .filter(Boolean);
+            const usedList = chosen.map((item) => {
+              let amountUsed = 1;
+              let unitUsed = item.unit || "count";
 
-            const parsedItems = segments.map((seg) => {
-              const lower = seg.toLowerCase();
-              let qty = 1;
-              let unit = "count";
-              let category = "Produce";
-
-              const numMatch = lower.match(/\b(\d+(\.\d+)?|a|one|two|three|four|five|six|half|dozen)\b/i);
-              if (numMatch) {
-                const word = numMatch[1].toLowerCase();
-                const wordMap = { a: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, half: 0.5, dozen: 12 };
-                qty = wordMap[word] !== undefined ? wordMap[word] : parseFloat(word) || 1;
+              if (item.unit === "gallons" || item.unit === "gallon") {
+                amountUsed = 1; // 1 cup of milk from a gallon
+                unitUsed = "cups";
+              } else if (item.unit === "cans" || item.unit === "can") {
+                amountUsed = 0.5; // 0.5 cup beans from a can
+                unitUsed = "cups";
+              } else if (item.unit === "oz") {
+                amountUsed = 2;
+                unitUsed = "oz";
+              } else if (item.unit === "cups") {
+                amountUsed = 0.5;
+                unitUsed = "cups";
               }
-
-              if (lower.includes("egg")) {
-                unit = "eggs";
-                category = "Dairy/Alts";
-                if (lower.includes("carton") || lower.includes("dozen")) qty = 12;
-              } else if (lower.includes("milk")) {
-                unit = "cups";
-                category = "Dairy/Alts";
-                if (qty === 1 && !lower.includes("cup")) qty = 4;
-              } else if (lower.includes("cheese")) {
-                unit = "oz";
-                category = "Dairy/Alts";
-                if (qty === 1 && !lower.includes("oz")) qty = 8;
-              } else if (lower.includes("bread")) {
-                unit = "slices";
-                category = "Bakery";
-                if (lower.includes("loaf")) qty = 16;
-              } else if (lower.includes("tortilla")) {
-                unit = "tortillas";
-                category = "Bakery";
-                if (lower.includes("pack")) qty = 10;
-              } else if (lower.includes("bean")) {
-                unit = "cans";
-                category = "Pantry";
-              } else if (lower.includes("chicken") || lower.includes("beef") || lower.includes("meat")) {
-                unit = "oz";
-                category = "Meat/Seafood";
-              } else if (lower.includes("chocolate")) {
-                unit = "bar";
-                category = "Snacks";
-              }
-
-              const cleanName = seg
-                .replace(/\b(\d+|a|an|one|two|three|four|five|six|half|dozen)\b/gi, "")
-                .replace(/\b(carton of|loaf of|pack of|head of|bag of|bottle of|can of|slices of|cups of|oz of|ounces of)\b/gi, "")
-                .trim();
-
-              const capitalized = cleanName ? cleanName.charAt(0).toUpperCase() + cleanName.slice(1) : seg;
 
               return {
-                name: capitalized,
-                quantity: qty,
-                unit: unit,
-                category: category,
-                expiration_date: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0]
+                itemId: item.id,
+                amountUsed,
+                unitUsed,
               };
             });
 
-            if (parsedItems.length > 0) {
-              return { items: parsedItems };
-            }
+            const ingredientNames = chosen.map(
+              (item, i) => `${usedList[i].amountUsed} ${usedList[i].unitUsed} ${item.name}`
+            );
+
+            const protein = Math.floor(Math.random() * 14) + 16;
+            const carbs = Math.floor(Math.random() * 20) + 20;
+            const fat = Math.floor(Math.random() * 8) + 8;
+            const calculatedCalories = Math.round((protein * 4) + (carbs * 4) + (fat * 9));
+
+            return {
+              title: `${chosen[0].name} Comfort Skillet`,
+              servings: 1,
+              calories: calculatedCalories,
+              nutrition: { protein, carbs, fat },
+              ingredients: [
+                ...ingredientNames,
+                "1 tbsp cooking oil or seasoning",
+                "Salt and black pepper to taste"
+              ],
+              instructions: [
+                `Prep ingredients: measure out ${ingredientNames.join(", ")}.`,
+                "Heat a lightly oiled skillet over medium heat.",
+                "Add your main ingredients, sautéing gently until warm and aromatic.",
+                "Season with salt and pepper to taste and enjoy immediately."
+              ],
+              usedIngredients: usedList,
+            };
           }
 
           return {
-            items: [
-              { name: "Bananas", quantity: 4, unit: "count", category: "Produce", expiration_date: today }
-            ]
+            title: "Quick Pantry Bowl",
+            servings: 1,
+            calories: 320,
+            nutrition: { protein: 12, carbs: 46, fat: 8 },
+            ingredients: ["Available pantry items", "Seasonings"],
+            instructions: ["Combine available ingredients and heat thoroughly."],
+            usedIngredients: [],
           };
         }
 
-        // Receipt scan fallback
-        return {
-          items: [
-            { name: "Eggs", quantity: 12, unit: "eggs", category: "Dairy/Alts", shelf_life_days: 21 },
-            { name: "Broccoli", quantity: 3, unit: "cups", category: "Produce", shelf_life_days: 5 },
-            { name: "Cheddar Cheese", quantity: 8, unit: "oz", category: "Dairy/Alts", shelf_life_days: 14 }
-          ]
-        };
+        return { items: [] };
       }
     }
   }
