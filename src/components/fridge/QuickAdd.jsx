@@ -8,24 +8,78 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Plus, X, Sparkles } from "lucide-react";
 
+// The exact standardized units used across ScanReceipt and RecipeTab
+export const STANDARD_UNITS = [
+  { value: "count", label: "count (items)" },
+  { value: "eggs", label: "eggs" },
+  { value: "cups", label: "cups" },
+  { value: "oz", label: "oz" },
+  { value: "lbs", label: "lbs" },
+  { value: "slices", label: "slices" },
+  { value: "tortillas", label: "tortillas" },
+  { value: "cans", label: "cans" },
+  { value: "bar", label: "bar" },
+  { value: "jar", label: "jar" },
+  { value: "bottle", label: "bottle" },
+];
+
 const SHELF_LIFE = {
   milk: 7, cream: 7, yogurt: 10, juice: 10, butter: 30, cheese: 14, "cottage cheese": 12,
   eggs: 21, chicken: 3, beef: 3, ham: 7, bacon: 7, fish: 2, shrimp: 2,
-  bread: 6, bagel: 6, "tortilla": 14, noodles: 30, pasta: 30, rice: 30,
+  bread: 6, bagel: 6, tortilla: 14, tortillas: 14, noodles: 30, pasta: 30, rice: 30,
   spinach: 5, lettuce: 5, greens: 5, salad: 4, arugula: 5, kale: 7,
   tomato: 7, tomatoes: 7, broccoli: 7, pepper: 7, cucumber: 7, carrot: 21,
   onion: 30, potato: 30, mushroom: 5, corn: 5, avocado: 5, zucchini: 7,
   apple: 21, banana: 5, berries: 5, strawberry: 5, blueberry: 5, grape: 7,
-  orange: 14, lemon: 21, lime: 21, peach: 5, pear: 7,
+  orange: 14, lemon: 21, lime: 21, peach: 5, pear: 7, chocolate: 60,
 };
+
+const UNIT_DEFAULTS = {
+  egg: { qty: 12, unit: "eggs" },
+  eggs: { qty: 12, unit: "eggs" },
+  milk: { qty: 4, unit: "cups" },
+  cream: { qty: 2, unit: "cups" },
+  cheese: { qty: 8, unit: "oz" },
+  cheddar: { qty: 8, unit: "oz" },
+  bread: { qty: 16, unit: "slices" },
+  tortilla: { qty: 10, unit: "tortillas" },
+  tortillas: { qty: 10, unit: "tortillas" },
+  broccoli: { qty: 3, unit: "cups" },
+  spinach: { qty: 3, unit: "cups" },
+  oats: { qty: 4, unit: "cups" },
+  chocolate: { qty: 1, unit: "bar" },
+  beans: { qty: 2, unit: "cans" },
+  turkey: { qty: 1, unit: "lbs" },
+  chicken: { qty: 1, unit: "lbs" },
+  beef: { qty: 1, unit: "lbs" },
+  peanut: { qty: 1, unit: "jar" },
+  juice: { qty: 1, unit: "bottle" },
+};
+
 const estimateDays = (name) => {
   const n = (name || "").toLowerCase();
   for (const key of Object.keys(SHELF_LIFE)) if (n.includes(key)) return SHELF_LIFE[key];
   return 7;
 };
+
+const guessUnitDefaults = (name) => {
+  const n = (name || "").toLowerCase();
+  for (const key of Object.keys(UNIT_DEFAULTS)) {
+    if (n.includes(key)) return UNIT_DEFAULTS[key];
+  }
+  return { qty: 1, unit: "count" };
+};
+
 const guessDate = (name) => format(addDays(new Date(), estimateDays(name)), "yyyy-MM-dd");
 
-const emptyRow = () => ({ name: "", quantity: 1, expiration_date: "", dateEdited: false });
+const emptyRow = () => ({
+  name: "",
+  quantity: 1,
+  unit: "count",
+  expiration_date: "",
+  dateEdited: false,
+  unitEdited: false,
+});
 
 export default function QuickAdd({ onAdded }) {
   const [open, setOpen] = useState(false);
@@ -37,17 +91,30 @@ export default function QuickAdd({ onAdded }) {
   const update = (idx, patch) =>
     setRows((rs) => rs.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
 
-  const onNameChange = (idx, v) =>
+  const onNameChange = (idx, v) => {
     setRows((rs) =>
-      rs.map((r, i) =>
-        i === idx
-          ? { ...r, name: v, expiration_date: r.dateEdited ? r.expiration_date : v.trim() ? guessDate(v) : "" }
-          : r
-      )
+      rs.map((r, i) => {
+        if (i !== idx) return r;
+        const guessed = guessUnitDefaults(v);
+        return {
+          ...r,
+          name: v,
+          quantity: r.unitEdited ? r.quantity : (v.trim() ? guessed.qty : 1),
+          unit: r.unitEdited ? r.unit : (v.trim() ? guessed.unit : "count"),
+          expiration_date: r.dateEdited ? r.expiration_date : (v.trim() ? guessDate(v) : ""),
+        };
+      })
     );
+  };
 
   const onDateChange = (idx, val) =>
     update(idx, { expiration_date: val, dateEdited: true });
+
+  const onUnitChange = (idx, val) =>
+    update(idx, { unit: val, unitEdited: true });
+
+  const onQtyChange = (idx, val) =>
+    update(idx, { quantity: val, unitEdited: true });
 
   const addRow = () => setRows((rs) => [...rs, emptyRow()]);
   const removeRow = (idx) => setRows((rs) => rs.filter((_, i) => i !== idx));
@@ -59,6 +126,7 @@ export default function QuickAdd({ onAdded }) {
       validRows.map((r) => ({
         name: r.name.trim(),
         quantity: Number(r.quantity) || 1,
+        unit: r.unit || "count",
         expiration_date: r.expiration_date || guessDate(r.name),
         status: "active",
       }))
@@ -76,37 +144,52 @@ export default function QuickAdd({ onAdded }) {
           <Plus className="w-4 h-4" /> Add Items
         </Button>
       </DialogTrigger>
-      <DialogContent className="rounded-2xl max-h-[88vh]">
+      <DialogContent className="rounded-2xl max-h-[88vh] max-w-2xl">
         <DialogHeader>
           <DialogTitle className="text-xl flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-emerald-500" /> Quick Add Groceries
           </DialogTitle>
         </DialogHeader>
         <p className="text-xs text-stone-500 -mt-1">
-          Add everything in your bag at once. Expiry dates are auto-guessed — tap to change.
+          Add items manually. Standard units, quantities, and shelf lives match your scanner.
         </p>
 
-        <div className="space-y-2 max-h-[52vh] overflow-y-auto pr-1">
+        <div className="space-y-2.5 max-h-[52vh] overflow-y-auto pr-1">
           {rows.map((r, idx) => (
             <div key={idx} className="flex items-center gap-2">
               <Input
                 value={r.name}
                 onChange={(e) => onNameChange(idx, e.target.value)}
-                placeholder="Item name"
-                className="rounded-xl flex-1"
+                placeholder="e.g. Eggs, Milk, Spinach"
+                className="rounded-xl flex-1 font-medium min-w-[120px]"
               />
               <Input
                 type="number"
-                min="1"
+                min="0.1"
+                step="any"
                 value={r.quantity}
-                onChange={(e) => update(idx, { quantity: e.target.value })}
-                className="rounded-xl w-14 text-center"
+                onChange={(e) => onQtyChange(idx, e.target.value)}
+                className="rounded-xl w-14 text-center px-1 font-semibold"
+                placeholder="Qty"
               />
+              {/* Standardized Multi-choice Unit Select */}
+              <select
+                value={r.unit}
+                onChange={(e) => onUnitChange(idx, e.target.value)}
+                className="h-10 rounded-xl border border-stone-200 bg-white px-2 text-xs font-medium text-stone-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+              >
+                {STANDARD_UNITS.map((u) => (
+                  <option key={u.value} value={u.value}>
+                    {u.label}
+                  </option>
+                ))}
+              </select>
+
               <Input
                 type="date"
                 value={r.expiration_date}
                 onChange={(e) => onDateChange(idx, e.target.value)}
-                className="rounded-xl w-[40%]"
+                className="rounded-xl w-[28%] text-xs"
               />
               {rows.length > 1 && (
                 <Button
@@ -134,7 +217,7 @@ export default function QuickAdd({ onAdded }) {
         <Button
           onClick={submit}
           disabled={saving || !validRows.length}
-          className="w-full rounded-xl bg-emerald-600 hover:bg-emerald-700"
+          className="w-full rounded-xl bg-emerald-600 hover:bg-emerald-700 font-semibold"
         >
           {saving ? "Adding..." : `Add all to fridge${validRows.length ? ` (${validRows.length})` : ""}`}
         </Button>

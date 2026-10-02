@@ -10,6 +10,9 @@ const EMOJI_MAP = {
   egg: "🥚", eggs: "🥚", chicken: "🍗", spinach: "🥬", lettuce: "🥬", apple: "🍎",
   banana: "🍌", yogurt: "🥣", butter: "🧈", carrot: "🥕", pepper: "🫑", onion: "🧅",
   potato: "🥔", fish: "🐟", beef: "🥩", ham: "🍖", juice: "🧃", cream: "🥛",
+  chocolate: "🍫", tortilla: "🫓", tortillas: "🫓", oat: "🥣", oats: "🥣",
+  bean: "🫘", beans: "🫘", coffee: "☕", turkey: "🦃", grape: "🍇", grapes: "🍇",
+  peanut: "🥜", orange: "🍊", clementine: "🍊", pasta: "🍝"
 };
 
 const emojiFor = (name) => {
@@ -17,7 +20,7 @@ const emojiFor = (name) => {
   for (const key of Object.keys(EMOJI_MAP)) {
     if (n.includes(key)) return EMOJI_MAP[key];
   }
-  return "🍽️";
+  return "🍽️️";
 };
 
 export default function ItemCard({ item, onConsume, onMarkWasted }) {
@@ -45,7 +48,7 @@ export default function ItemCard({ item, onConsume, onMarkWasted }) {
         <div>
           <p className="font-semibold text-stone-800">{item.name}</p>
           <p className="text-sm text-stone-500">
-            Qty {item.quantity} ·{" "}
+            Qty {item.quantity} {item.unit ? `${item.unit} ` : ""}·{" "}
             <span className={urgent ? "text-rose-500 font-semibold" : soon ? "text-amber-600 font-semibold" : "text-emerald-600 font-medium"}>
               {daysLeft < 0 ? "expired" : daysLeft === 0 ? "today!" : `${daysLeft}d left`}
             </span>

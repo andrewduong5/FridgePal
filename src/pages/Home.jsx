@@ -20,7 +20,14 @@ export default function Home() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [celebrate, setCelebrate] = useState(false);
-  const [recipeCount, setRecipeCount] = useState(0);
+
+  // Persist meals cooked and cooking XP earned from used ingredient quantities
+  const [recipeCount, setRecipeCount] = useState(() => {
+    return Number(localStorage.getItem("fridgepal_recipe_count") || 0);
+  });
+  const [cookingXP, setCookingXP] = useState(() => {
+    return Number(localStorage.getItem("fridgepal_cooking_xp") || 0);
+  });
 
   const load = useCallback(async () => {
     const [active, past] = await Promise.all([
@@ -49,9 +56,32 @@ export default function Home() {
     }
     load();
   };
+
   const markWasted = async (item) => {
     await fridgePalClient.entities.GroceryItem.update(item.id, { status: "wasted" });
     load();
+  };
+
+  const handleRecipeCooked = (quantityUsed) => {
+    // 5 XP for every unit of ingredient put to use + 10 XP base meal bonus
+    const earnedXP = Math.max(10, Math.round(quantityUsed * 5) + 10);
+
+    setRecipeCount((prev) => {
+      const next = prev + 1;
+      localStorage.setItem("fridgepal_recipe_count", String(next));
+      return next;
+    });
+
+    setCookingXP((prev) => {
+      const next = prev + earnedXP;
+      localStorage.setItem("fridgepal_cooking_xp", String(next));
+      return next;
+    });
+
+    load();
+    fireConfetti();
+    setCelebrate(true);
+    setTimeout(() => setCelebrate(false), 1800);
   };
 
   return (
@@ -74,7 +104,11 @@ export default function Home() {
       </div>
 
       <main className="max-w-2xl mx-auto px-6 pb-20 space-y-5">
-        <ProgressTracker history={history} recipeCount={recipeCount} />
+        <ProgressTracker 
+          history={history} 
+          recipeCount={recipeCount} 
+          cookingXP={cookingXP}
+        />
 
         {!loading && <ExpiringBanner items={items} />}
 
@@ -103,7 +137,10 @@ export default function Home() {
           </TabsContent>
 
           <TabsContent value="recipe" className="mt-5">
-            <RecipeTab items={items} onGenerated={() => setRecipeCount((c) => c + 1)} />
+            <RecipeTab 
+              items={items} 
+              onItemsUpdated={handleRecipeCooked}
+            />
           </TabsContent>
 
           <TabsContent value="insights" className="mt-5">
@@ -120,7 +157,7 @@ export default function Home() {
             exit={{ opacity: 0, scale: 0.9 }}
             className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-emerald-600 text-white px-6 py-3 rounded-full shadow-xl font-semibold flex items-center gap-2 z-50"
           >
-            🎉 Great job! Nothing wasted!
+            🎉 Great job! Ingredients used and EXP gained!
           </motion.div>
         )}
       </AnimatePresence>

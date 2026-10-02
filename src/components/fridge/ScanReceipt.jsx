@@ -11,10 +11,24 @@ import { useToast } from "@/components/ui/use-toast";
 import ScanReview from "@/components/fridge/ScanReview";
 
 const SYSTEM_INSTRUCTIONS = `Extract every grocery item found in this receipt or photo. For each item:
-1. Clean and normalize the name (e.g., resolve abbreviations like 'ORG RD DRGNFRT' into 'Red Dragon Fruit'). Do NOT rely on a fixed list — dynamically detect any food, including uncommon, regional, and specialty items (e.g., dragonfruit, bok choy, oat milk).
-2. Determine the quantity purchased (default 1).
-3. Identify the food category: one of Produce, Dairy/Alts, Meat/Seafood, Bakery, Pantry, Frozen.
-4. Dynamically estimate the shelf-life in days based on standard real-world refrigeration and pantry guidelines (e.g., Dragon Fruit: 5 days, Fresh Spinach: 5 days, Milk: 7 days, Cheddar: 14 days, Fresh Chicken: 2 days).
+1. Clean and normalize the name (e.g., 'Moser Roth Dark Chocolate Bar', 'Organic Gala Apples'). Do NOT rely on a fixed list — dynamically detect any food.
+2. Determine quantity and unit using intuitive everyday cooking units:
+   - COUNTABLE ITEMS (Must use whole numbers, NEVER decimal weights like 3.5):
+     * Chocolate bars, snack bars, candy: count individual bars (e.g., 1, unit: 'bar')
+     * Cans & Jars (beans, peanut butter, sauce, coffee): count containers (e.g., 2, unit: 'cans' or 1, unit: 'jar')
+     * Eggs: count total eggs (e.g., 12, unit: 'eggs')
+     * Tortillas / Wraps: count sheets (e.g., 10, unit: 'tortillas')
+     * Sliced bread: count slices (e.g., 16, unit: 'slices')
+     * Whole produce (bananas, apples, onions, avocados, lemons): count individual items (e.g., 5, unit: 'bananas')
+   - BULK / VOLUME ITEMS (Use standard cooking measurements):
+     * Shredded cheese: package weight (e.g., 8, unit: 'oz')
+     * Milk / liquids: cooking volume (e.g., 4, unit: 'cups' or 0.5, unit: 'gallon')
+     * Bagged florets / greens (broccoli, spinach): volume (e.g., 3, unit: 'cups')
+     * Grains / Rolled oats: volume (e.g., 4, unit: 'cups')
+     * Fresh meat (ground turkey, chicken): weight (e.g., 1, unit: 'lbs' or 16, unit: 'oz')
+3. Assign an appropriate, clear unit ('bar', 'jar', 'can', 'eggs', 'tortillas', 'slices', 'cups', 'oz', 'lbs', 'count').
+4. Identify food category: Produce, Dairy/Alts, Meat/Seafood, Bakery, Pantry, Snacks, Frozen.
+5. Dynamically estimate the shelf-life in days based on standard real-world refrigeration and pantry guidelines.
 Ignore non-food entries such as taxes, register numbers, store information, and household items.`;
 
 export default function ScanReceipt({ onAdded }) {
@@ -52,13 +66,33 @@ export default function ScanReceipt({ onAdded }) {
           setImageUrl(file_url);
 
           const result = await fridgePalClient.integrations.Core.InvokeLLM({
-            prompt: `${SYSTEM_INSTRUCTIONS}\n\nToday's date is ${format(new Date(), "yyyy-MM-dd")}. Return a JSON object with an "items" array containing the detected food items. Each item must have: name, quantity, category, shelf_life_days.`,
+            prompt: `${SYSTEM_INSTRUCTIONS}\n\nToday's date is ${format(new Date(), "yyyy-MM-dd")}. Return a JSON object with an "items" array containing the detected food items. Each item must have: name, quantity, unit, category, shelf_life_days.`,
             file_urls: [file_url],
+            response_json_schema: {
+              type: "object",
+              properties: {
+                items: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      name: { type: "string" },
+                      quantity: { type: "number", description: "Intuitive count or volume amount (e.g. 1 for a chocolate bar, 12 for eggs, 2 for cans)" },
+                      unit: { type: "string", description: "e.g., 'bar', 'jar', 'can', 'eggs', 'tortillas', 'slices', 'cups', 'oz', 'lbs', 'count'" },
+                      category: { type: "string" },
+                      shelf_life_days: { type: "number" }
+                    },
+                    required: ["name", "quantity", "unit", "category", "shelf_life_days"]
+                  }
+                }
+              },
+              required: ["items"]
+            }
           });
 
           console.log("Gemini parsed result:", result);
 
-          // Handle array directly or wrapped in an object property (items, grocery_items, foods, etc.)
+          // Handle array directly or wrapped in an object property
           let rawList = [];
           if (Array.isArray(result)) {
             rawList = result;
@@ -74,10 +108,11 @@ export default function ScanReceipt({ onAdded }) {
 
           const detected = rawList.filter((i) => i && (i.name || i.item));
 
-          // Normalize property names in case the AI used 'item' instead of 'name'
+          // Normalize property names and default units
           const formatted = detected.map((i) => ({
             name: String(i.name || i.item || "Unknown item").trim(),
             quantity: Number(i.quantity) || 1,
+            unit: String(i.unit || "units").trim(),
             category: i.category || "Produce",
             shelf_life_days: Number(i.shelf_life_days || i.shelf_life || 7),
           }));
@@ -111,6 +146,7 @@ export default function ScanReceipt({ onAdded }) {
       .map((i) => ({
         name: String(i.name).trim(),
         quantity: Number(i.quantity) || 1,
+        unit: i.unit || "units",
         category: i.category,
         expiration_date: format(addDays(new Date(), Number(i.shelf_life_days)), "yyyy-MM-dd"),
         status: "active",

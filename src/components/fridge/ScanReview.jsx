@@ -9,6 +9,7 @@ const CATEGORY_COLORS = {
   "Meat/Seafood": "bg-rose-100 text-rose-700",
   Bakery: "bg-amber-100 text-amber-700",
   Pantry: "bg-stone-200 text-stone-700",
+  Snacks: "bg-purple-100 text-purple-700",
   Frozen: "bg-cyan-100 text-cyan-700",
 };
 
@@ -17,16 +18,26 @@ export default function ScanReview({ items, imageUrl, onConfirm, onRetake }) {
     items.map((i) => ({
       name: String(i.name),
       quantity: Number(i.quantity) || 1,
+      unit: String(i.unit || "count"),
       category: i.category || "Pantry",
       shelf_life_days: Number(i.shelf_life_days) || 7,
     }))
   );
   const [saving, setSaving] = useState(false);
 
-  const update = (idx, patch) => setRows((rs) => rs.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+  const update = (idx, patch) =>
+    setRows((rs) => rs.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+
   const remove = (idx) => setRows((rs) => rs.filter((_, i) => i !== idx));
+
   const bumpQty = (idx, delta) =>
-    setRows((rs) => rs.map((r, i) => (i === idx ? { ...r, quantity: Math.max(1, (Number(r.quantity) || 1) + delta) } : r)));
+    setRows((rs) =>
+      rs.map((r, i) =>
+        i === idx
+          ? { ...r, quantity: Math.max(1, (Number(r.quantity) || 1) + delta) }
+          : r
+      )
+    );
 
   const submit = async () => {
     setSaving(true);
@@ -40,21 +51,35 @@ export default function ScanReview({ items, imageUrl, onConfirm, onRetake }) {
         <p className="text-sm text-stone-500">
           {rows.length} item{rows.length !== 1 ? "s" : ""} detected — review before adding.
         </p>
-        <Button variant="ghost" size="sm" className="text-emerald-700 hover:bg-emerald-50 gap-1" onClick={onRetake}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-emerald-700 hover:bg-emerald-50 gap-1"
+          onClick={onRetake}
+        >
           <RotateCcw className="w-4 h-4" /> Retake
         </Button>
       </div>
 
       {imageUrl && (
-        <img src={imageUrl} alt="scanned" className="w-full max-h-32 object-cover rounded-xl border border-stone-200" />
+        <img
+          src={imageUrl}
+          alt="scanned"
+          className="w-full max-h-32 object-cover rounded-xl border border-stone-200"
+        />
       )}
 
       <div className="max-h-[48vh] overflow-y-auto space-y-2 pr-1">
         {rows.length === 0 && (
-          <p className="text-center text-stone-400 py-8 text-sm">No items detected. Try a clearer photo.</p>
+          <p className="text-center text-stone-400 py-8 text-sm">
+            No items detected. Try a clearer photo.
+          </p>
         )}
         {rows.map((r, idx) => (
-          <div key={idx} className="bg-white rounded-xl border border-stone-200 p-3 space-y-2">
+          <div
+            key={idx}
+            className="bg-white rounded-xl border border-stone-200 p-3 space-y-2"
+          >
             <div className="flex items-center gap-2">
               <Input
                 value={r.name}
@@ -70,30 +95,58 @@ export default function ScanReview({ items, imageUrl, onConfirm, onRetake }) {
                 <Trash2 className="w-4 h-4" />
               </button>
             </div>
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-stone-400">Qty</span>
+
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              {/* Quantity Controls & Unit */}
+              <div className="flex items-center gap-1.5">
                 <div className="flex items-center gap-1">
-                  <button type="button" onClick={() => bumpQty(idx, -1)} className="w-7 h-7 rounded-lg bg-stone-100 hover:bg-stone-200 flex items-center justify-center">
+                  <button
+                    type="button"
+                    onClick={() => bumpQty(idx, -1)}
+                    className="w-7 h-7 rounded-lg bg-stone-100 hover:bg-stone-200 flex items-center justify-center"
+                  >
                     <Minus className="w-3.5 h-3.5" />
                   </button>
-                  <span className="w-6 text-center font-semibold">{r.quantity}</span>
-                  <button type="button" onClick={() => bumpQty(idx, 1)} className="w-7 h-7 rounded-lg bg-stone-100 hover:bg-stone-200 flex items-center justify-center">
+                  <span className="w-7 text-center font-semibold text-sm">
+                    {r.quantity}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => bumpQty(idx, 1)}
+                    className="w-7 h-7 rounded-lg bg-stone-100 hover:bg-stone-200 flex items-center justify-center"
+                  >
                     <Plus className="w-3.5 h-3.5" />
                   </button>
                 </div>
+
+                <Input
+                  value={r.unit}
+                  onChange={(e) => update(idx, { unit: e.target.value })}
+                  placeholder="unit"
+                  className="rounded-lg w-16 text-center h-8 text-xs text-stone-600 px-1"
+                />
               </div>
-              <span className={`text-xs px-2 py-1 rounded-full font-medium ${CATEGORY_COLORS[r.category] || "bg-stone-100 text-stone-600"}`}>
+
+              {/* Category Badge */}
+              <span
+                className={`text-xs px-2 py-1 rounded-full font-medium ${
+                  CATEGORY_COLORS[r.category] || "bg-stone-100 text-stone-600"
+                }`}
+              >
                 {r.category}
               </span>
+
+              {/* Shelf-Life Input */}
               <label className="flex items-center gap-1 text-xs text-stone-400">
                 Shelf
                 <Input
                   type="number"
                   min="1"
                   value={r.shelf_life_days}
-                  onChange={(e) => update(idx, { shelf_life_days: e.target.value })}
-                  className="rounded-lg w-14 text-center h-8"
+                  onChange={(e) =>
+                    update(idx, { shelf_life_days: e.target.value })
+                  }
+                  className="rounded-lg w-12 text-center h-8 px-1"
                 />
                 d
               </label>
@@ -102,7 +155,11 @@ export default function ScanReview({ items, imageUrl, onConfirm, onRetake }) {
         ))}
       </div>
 
-      <Button onClick={submit} disabled={saving || rows.length === 0} className="w-full rounded-xl bg-emerald-600 hover:bg-emerald-700">
+      <Button
+        onClick={submit}
+        disabled={saving || rows.length === 0}
+        className="w-full rounded-xl bg-emerald-600 hover:bg-emerald-700"
+      >
         {saving ? "Adding..." : `Add All to Fridge (${rows.length})`}
       </Button>
     </div>
